@@ -2,7 +2,23 @@
 
 #define WINDOW_WIDTH 1600
 #define WINDOW_HEIGHT 900
-#define CIRCLE_RADIUS 300
+
+struct Light {
+    Vector3 position;
+    Vector3 intensity;
+};
+
+struct Sphere {
+    Vector3 center;
+    float radius;
+    Vector3 color;
+};
+
+struct Scene {
+    Camera camera;
+    std::vector<Light> lights;
+    std::vector<Sphere> spheres;
+};
 
 typedef struct s_vars {
     void *mlx;
@@ -22,37 +38,67 @@ void my_mlx_pixel_put(t_vars *vars, int x, int y, int color)
     *(unsigned int*)dst = color;
 }
 
-int calculate_color(const Vector3& point, const Vector3& light_dir)
+Vector3 calculate_color(const Vector3& point, const Vector3& normal, const Sphere& sphere, const std::vector<Light>& lights)
 {
-    float intensity = std::max(0.0f, point.normalize() * light_dir);
-    intensity = pow(intensity, M_PI);
-    int r = static_cast<int>(255 * intensity);
-    int g = static_cast<int>(200 * intensity);
-    int b = static_cast<int>(150 * intensity);
-    return (r << 16) | (g << 8) | b;
+    Vector3 color(0, 0, 0);
+    Vector3 contribution(0, 0, 0);
+    for (const auto& light : lights)
+    {
+        Vector3 light_dir = (light.position - point).normalize();
+        float intensity = std::max(0.0f, normal * light_dir);
+        contribution = Vector3( sphere.color.x() * light.intensity.x() * intensity,
+                               sphere.color.y() * light.intensity.y() * intensity,
+                               sphere.color.z() * light.intensity.z() * intensity);
+        color = color + contribution;
+    }
+    return color * 255.0f;
 }
 
-void draw_circle(t_vars *vars, int center_x, int center_y, int radius)
+bool intersect_sphere(const Vector3& ray_origin, const Vector3& ray_dir, const Sphere& sphere, float& t)
 {
-    Vector3 light_dir = Vector3(1, 1, 1).normalize();
-    
-    for (int y = -radius; y <= radius; y++)
-    {
-        for (int x = -radius; x <= radius; x++)
-        {
-            if (x*x + y*y <= radius*radius)
-            {
-                float z = sqrt(radius*radius - x*x - y*y);
-                Vector3 point(x, y, z);
-                
-                int color = calculate_color(point, light_dir);
-                
-                int draw_x = center_x + x;
-                int draw_y = center_y + y;
-                if (draw_x >= 0 && draw_x < WINDOW_WIDTH && draw_y >= 0 && draw_y < WINDOW_HEIGHT)
-                {
-                    my_mlx_pixel_put(vars, draw_x, draw_y, color);
+    Vector3 oc = ray_origin - sphere.center;
+    float a = ray_dir * ray_dir;
+    float b = 2.0 * (oc * ray_dir);
+    float c = (oc * oc) - sphere.radius * sphere.radius;
+    float discriminant = b * b - 4 * a * c;
+
+    if (discriminant < 0) {
+        return false;
+    } else {
+        float t0 = (-b - sqrt(discriminant)) / (2.0 * a);
+        float t1 = (-b + sqrt(discriminant)) / (2.0 * a);
+        t = (t0 < t1) ? t0 : t1;
+        return t > 0;
+    }
+}
+
+void render_scene(t_vars *vars, const Scene& scene)
+{
+    for (int y = 0; y < WINDOW_HEIGHT; ++y) {
+        for (int x = 0; x < WINDOW_WIDTH; ++x) {
+            float u = float(x) / float(WINDOW_WIDTH);
+            float v = float(y) / float(WINDOW_HEIGHT);
+
+            Vector3 ray_dir = scene.camera.ray_direction(u, v);
+            float closest_t = 2147483647;
+            const Sphere* closest_sphere = nullptr;
+
+            for (const auto& sphere : scene.spheres) {
+                float t;
+                if (intersect_sphere(scene.camera.position, ray_dir, sphere, t) && t < closest_t) {
+                    closest_t = t;
+                    closest_sphere = &sphere;
                 }
+            }
+
+            if (closest_sphere) {
+                Vector3 hit_point = scene.camera.position + closest_t * ray_dir;
+                Vector3 normal = (hit_point - closest_sphere->center).normalize();
+                Vector3 color = calculate_color(hit_point, normal, *closest_sphere, scene.lights);
+                int pixel_color = (static_cast<int>(color.x()) << 16) | (static_cast<int>(color.y()) << 8) | static_cast<int>(color.z());
+                my_mlx_pixel_put(vars, x, y, pixel_color);
+            } else {
+                my_mlx_pixel_put(vars, x, y, 0);  // Background color (black)
             }
         }
     }
@@ -60,7 +106,6 @@ void draw_circle(t_vars *vars, int center_x, int center_y, int radius)
 
 int key_hook(int keycode, t_vars *vars)
 {
-    std::cout << "Key pressed: " << keycode << std::endl;
     if (keycode == 65307) // ESC key
     {
         mlx_destroy_window(vars->mlx, vars->win);
@@ -70,15 +115,83 @@ int key_hook(int keycode, t_vars *vars)
     return (0);
 }
 
-int main(void)
+Scene parse_scene_file(const std::string& filename)
 {
+    Scene scene;
+    std::ifstream file(filename);
+    std::string line;
+    float x;
+    float y;
+    float z;
+    float fov = 90;
+
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        char type;
+        iss >> type;
+
+        if (type == 'C') {
+            Vector3 position, direction, up;
+            iss >> x >> y >> z;
+            position = Vector3(x, y, z);
+            iss >> x >> y >> z;
+            direction = Vector3(x, y, z);
+            iss >> x >> y >> z;
+            up = Vector3(x, y, z);
+            scene.camera = Camera(position, direction, up, fov, float(WINDOW_WIDTH) / float(WINDOW_HEIGHT));
+            std::cout << "Camera added" << std::endl;
+            std::cout << "Position: ";
+            position.print();
+            std::cout << "Direction: ";
+            direction.print();
+        } else if (type == 'L') {
+            Light light;
+            iss >> x >> y >> z;
+            light.position = Vector3(x, y, z);
+            iss >> x >> y >> z;
+            light.intensity = Vector3(x, y, z);
+            scene.lights.push_back(light);
+            std::cout << "Light added" << std::endl;
+            std::cout << "Position: ";
+            light.position.print();
+            std::cout << "Intensity: ";
+            light.intensity.print();
+        } else if (type == 'S') {
+            Sphere sphere;
+            iss >> x >> y >> z;
+            sphere.center = Vector3(x, y, z);
+            iss >> sphere.radius;
+            iss >> x >> y >> z;
+            sphere.color = Vector3(x, y, z);
+            sphere.color = sphere.color / 255.0f;  // Normalize color values
+            scene.spheres.push_back(sphere);
+            std::cout << "Sphere added" << std::endl;
+            std::cout << "Center: ";
+            sphere.center.print();
+            std::cout << "Color: ";
+            std::cout << sphere.color.x() * 255 << " " << sphere.color.y() * 255 << " " << sphere.color.z() * 255 << std::endl;
+        }
+    }
+
+    return scene;
+}
+
+int main(int argc, char** argv)
+{
+    if (argc != 2) {
+        std::cerr << "Usage: " << argv[0] << " <scene_file>" << std::endl;
+        return 1;
+    }
+
+    Scene scene = parse_scene_file(argv[1]);
+
     t_vars vars;
 
     vars.mlx = mlx_init();
     if (!vars.mlx)
         return (1);
 
-    vars.win = mlx_new_window(vars.mlx, WINDOW_WIDTH, WINDOW_HEIGHT, (char *)"3D Circle Display");
+    vars.win = mlx_new_window(vars.mlx, WINDOW_WIDTH, WINDOW_HEIGHT, (char *)"RT Scene Renderer");
     if (!vars.win)
     {
         mlx_destroy_display(vars.mlx);
@@ -88,7 +201,8 @@ int main(void)
     vars.img = mlx_new_image(vars.mlx, WINDOW_WIDTH, WINDOW_HEIGHT);
     vars.addr = mlx_get_data_addr(vars.img, &vars.bits_per_pixel, &vars.line_length, &vars.endian);
 
-    draw_circle(&vars, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2, CIRCLE_RADIUS);
+    // Render the scene
+    render_scene(&vars, scene);
 
     mlx_put_image_to_window(vars.mlx, vars.win, vars.img, 0, 0);
 
