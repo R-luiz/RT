@@ -1,27 +1,100 @@
-#include "../libs/libs.hpp"
+#include "libs.hpp"
 
-int main() {
-    Vector3 v1(1, 2, 3);
-    Vector3 v2(4, 5, 6);
-    Vector3 v3 = v1 + v2;
-    Vector3 v4 = v1 - v2;
-    Vector3 v5 = v1 * 2;
-    Vector3 v6 = v1 / 2;
-    float dot = v1 * v2;
-    Vector3 cross = v1.cross(v2);
-    float len = v1.length();
-    Vector3 norm = v1.normalize();
+#define WINDOW_WIDTH 1600
+#define WINDOW_HEIGHT 900
+#define CIRCLE_RADIUS 300
 
-    std::cout << "v1: " << v1.x() << ", " << v1.y() << ", " << v1.z() << std::endl;
-    std::cout << "v2: " << v2.x() << ", " << v2.y() << ", " << v2.z() << std::endl;
-    std::cout << "v1 + v2: " << v3.x() << ", " << v3.y() << ", " << v3.z() << std::endl;
-    std::cout << "v1 - v2: " << v4.x() << ", " << v4.y() << ", " << v4.z() << std::endl;
-    std::cout << "v1 * 2: " << v5.x() << ", " << v5.y() << ", " << v5.z() << std::endl;
-    std::cout << "v1 / 2: " << v6.x() << ", " << v6.y() << ", " << v6.z() << std::endl;
-    std::cout << "v1 * v2: " << dot << std::endl;
-    std::cout << "v1 x v2: " << cross.x() << ", " << cross.y() << ", " << cross.z() << std::endl;
-    std::cout << "v1 length: " << len << std::endl;
-    std::cout << "v1 normalized: " << norm.x() << ", " << norm.y() << ", " << norm.z() << std::endl;
+typedef struct s_vars {
+    void *mlx;
+    void *win;
+    void *img;
+    char *addr;
+    int bits_per_pixel;
+    int line_length;
+    int endian;
+} t_vars;
+
+void my_mlx_pixel_put(t_vars *vars, int x, int y, int color)
+{
+    char *dst;
+
+    dst = vars->addr + (y * vars->line_length + x * (vars->bits_per_pixel / 8));
+    *(unsigned int*)dst = color;
+}
+
+int calculate_color(const Vector3& point, const Vector3& light_dir)
+{
+    float intensity = std::max(0.0f, point.normalize() * light_dir);
+    intensity = pow(intensity, M_PI);
+    int r = static_cast<int>(255 * intensity);
+    int g = static_cast<int>(200 * intensity);
+    int b = static_cast<int>(150 * intensity);
+    return (r << 16) | (g << 8) | b;
+}
+
+void draw_circle(t_vars *vars, int center_x, int center_y, int radius)
+{
+    Vector3 light_dir = Vector3(1, 1, 1).normalize();
     
-    return 0;
+    for (int y = -radius; y <= radius; y++)
+    {
+        for (int x = -radius; x <= radius; x++)
+        {
+            if (x*x + y*y <= radius*radius)
+            {
+                float z = sqrt(radius*radius - x*x - y*y);
+                Vector3 point(x, y, z);
+                
+                int color = calculate_color(point, light_dir);
+                
+                int draw_x = center_x + x;
+                int draw_y = center_y + y;
+                if (draw_x >= 0 && draw_x < WINDOW_WIDTH && draw_y >= 0 && draw_y < WINDOW_HEIGHT)
+                {
+                    my_mlx_pixel_put(vars, draw_x, draw_y, color);
+                }
+            }
+        }
+    }
+}
+
+int key_hook(int keycode, t_vars *vars)
+{
+    std::cout << "Key pressed: " << keycode << std::endl;
+    if (keycode == 65307) // ESC key
+    {
+        mlx_destroy_window(vars->mlx, vars->win);
+        mlx_destroy_display(vars->mlx);
+        std::exit(0);
+    }
+    return (0);
+}
+
+int main(void)
+{
+    t_vars vars;
+
+    vars.mlx = mlx_init();
+    if (!vars.mlx)
+        return (1);
+
+    vars.win = mlx_new_window(vars.mlx, WINDOW_WIDTH, WINDOW_HEIGHT, (char *)"3D Circle Display");
+    if (!vars.win)
+    {
+        mlx_destroy_display(vars.mlx);
+        return (1);
+    }
+
+    vars.img = mlx_new_image(vars.mlx, WINDOW_WIDTH, WINDOW_HEIGHT);
+    vars.addr = mlx_get_data_addr(vars.img, &vars.bits_per_pixel, &vars.line_length, &vars.endian);
+
+    draw_circle(&vars, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2, CIRCLE_RADIUS);
+
+    mlx_put_image_to_window(vars.mlx, vars.win, vars.img, 0, 0);
+
+    mlx_key_hook(vars.win, reinterpret_cast<int (*)(int, void *)>(key_hook), &vars);
+
+    mlx_loop(vars.mlx);
+
+    return (0);
 }

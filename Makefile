@@ -1,6 +1,7 @@
 # Compiler and flags
 CXX = g++
 CXXFLAGS = -Wall -Wextra -Werror -std=c++11 -O3 -march=native -msse4.1 -I./libs -I./libs/minilibx-linux -I./libs/math
+LDFLAGS = -L./libs/minilibx-linux -lmlx -lX11 -lXext -lm -lz -lpthread
 
 # Directories
 SRC_DIR = src
@@ -10,17 +11,14 @@ MLX_DIR = $(LIB_DIR)/minilibx-linux
 MATH_DIR = $(LIB_DIR)/math
 
 # Source and object files
-MAIN_SRC = $(SRC_DIR)/main.cpp
-SRCS = $(filter-out $(MAIN_SRC), $(wildcard $(SRC_DIR)/*.cpp) $(wildcard $(MATH_DIR)/*.cpp))
+SRCS = $(wildcard $(SRC_DIR)/*.cpp)
 OBJS = $(SRCS:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
-OBJS += $(SRCS:$(MATH_DIR)/%.cpp=$(OBJ_DIR)/%.o)
-MAIN_OBJ = $(OBJ_DIR)/main.o
 
 # Executable name
 NAME = rt
 
 # MiniLibX library
-MLX = $(MLX_DIR)/libmlx_Linux.a
+MLX = $(MLX_DIR)/libmlx.a
 
 # Phony targets
 .PHONY: all clean fclean re
@@ -34,21 +32,12 @@ $(MLX):
 	@$(MAKE) -C $(MLX_DIR)
 
 # Linking
-$(NAME): $(OBJS) $(MAIN_OBJ)
+$(NAME): $(OBJS) $(MLX)
 	@echo "Linking $(NAME)..."
-	@$(CXX) $(CXXFLAGS) $^ -L$(MLX_DIR) -lmlx_Linux -lXext -lX11 -lm -lz -o $@
+	@$(CXX) $(CXXFLAGS) $(OBJS) -o $@ -L$(MLX_DIR) -lmlx -lX11 -lXext -lm -lz -lpthread
 
-# Compiling main source file
-$(MAIN_OBJ): $(MAIN_SRC) | $(OBJ_DIR)
-	@echo "Compiling $<..."
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
-
-# Compiling other source files
+# Compiling source files
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
-	@echo "Compiling $<..."
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
-
-$(OBJ_DIR)/%.o: $(MATH_DIR)/%.cpp | $(OBJ_DIR)
 	@echo "Compiling $<..."
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
